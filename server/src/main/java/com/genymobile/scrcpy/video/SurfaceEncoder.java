@@ -98,6 +98,9 @@ public class SurfaceEncoder implements AsyncProcessor {
                     mediaCodec.start();
                     mediaCodecStarted = true;
 
+                    // Reset error counter — successfully restarted after rotation
+                    consecutiveErrors = 0;
+
                     // Set the MediaCodec instance to "interrupt" (by signaling an EOS) on reset
                     reset.setRunningMediaCodec(mediaCodec);
 
@@ -155,7 +158,8 @@ public class SurfaceEncoder implements AsyncProcessor {
             }
 
             // Wait a bit to increase the probability that retrying will fix the problem
-            SystemClock.sleep(50);
+            // Progressive delay: wait longer on each retry to let rotation transition complete
+            SystemClock.sleep(100L * consecutiveErrors);
             return true;
         }
 

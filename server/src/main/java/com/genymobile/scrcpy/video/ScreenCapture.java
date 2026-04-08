@@ -21,11 +21,15 @@ import android.graphics.Rect;
 import android.hardware.display.VirtualDisplay;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.SystemClock;
 import android.view.Surface;
 
 import java.io.IOException;
 
 public class ScreenCapture extends SurfaceCapture {
+
+    private static final int DISPLAY_RETRY_COUNT = 5;
+    private static final int DISPLAY_RETRY_DELAY_MS = 100;
 
     private final VirtualDisplayListener vdListener;
     private final int displayId;
@@ -124,23 +128,37 @@ public class ScreenCapture extends SurfaceCapture {
             inputSize = videoSize;
         }
 
-        try {
-            virtualDisplay = ServiceManager.getDisplayManager()
-                    .createVirtualDisplay("scrcpy", inputSize.getWidth(), inputSize.getHeight(), displayId, surface);
-            Ln.d("Display: using DisplayManager API");
-        } catch (Exception displayManagerException) {
-            try {
-                display = createDisplay();
-
-                Size deviceSize = displayInfo.getSize();
-                int layerStack = displayInfo.getLayerStack();
-                setDisplaySurface(display, surface, deviceSize.toRect(), inputSize.toRect(), layerStack);
-                Ln.d("Display: using SurfaceControl API");
-            } catch (Exception surfaceControlException) {
-                Ln.e("Could not create display using DisplayManager", displayManagerException);
-                Ln.e("Could not create display using SurfaceControl", surfaceControlException);
-                throw new AssertionError("Could not create display");
+        IOException lastException = null;
+        for (int attempt = 0; attempt < DISPLAY_RETRY_COUNT; attempt++) {
+            if (attempt > 0) {
+                Ln.w("Retrying display creation (attempt " + (attempt + 1) + ")");
+                SystemClock.sleep(DISPLAY_RETRY_DELAY_MS);
             }
+            try {
+                virtualDisplay = ServiceManager.getDisplayManager()
+                        .createVirtualDisplay("scrcpy", inputSize.getWidth(), inputSize.getHeight(), displayId, surface);
+                Ln.d("Display: using DisplayManager API");
+                lastException = null;
+                break;
+            } catch (Exception displayManagerException) {
+                try {
+                    display = createDisplay();
+                    Size deviceSize = displayInfo.getSize();
+                    int layerStack = displayInfo.getLayerStack();
+                    setDisplaySurface(display, surface, deviceSize.toRect(), inputSize.toRect(), layerStack);
+                    Ln.d("Display: using SurfaceControl API");
+                    lastException = null;
+                    break;
+                } catch (Exception surfaceControlException) {
+                    if (attempt < DISPLAY_RETRY_COUNT - 1) {
+                        Ln.w("Display creation attempt " + (attempt + 1) + " failed, retrying...");
+                    }
+                    lastException = new IOException("Could not create display", surfaceControlException);
+                }
+            }
+        }
+        if (lastException != null) {
+            throw lastException;
         }
 
         if (vdListener != null) {

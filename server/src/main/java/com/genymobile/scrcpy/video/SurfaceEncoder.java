@@ -167,6 +167,15 @@ public class SurfaceEncoder implements AsyncProcessor {
                     }
                 } catch (IllegalStateException | IllegalArgumentException | IOException e) {
                     if (IO.isBrokenPipe(e)) {
+                        if (reset.hasPendingReset()) {
+                            // Broken pipe during rotation transition: the client may have been
+                            // disrupted by trailing encoder output during rotation. Allow the
+                            // rotation loop to complete one more iteration so the new encoder
+                            // gets a chance to write to the socket cleanly.
+                            Ln.w("Broken pipe during pending reset, retrying after rotation");
+                            alive = true;
+                            continue;
+                        }
                         // Do not retry on broken pipe, which is expected on close because the socket is closed by the client
                         throw e;
                     }
@@ -282,6 +291,16 @@ public class SurfaceEncoder implements AsyncProcessor {
                 }
                 if (outputBufferId >= 0 && bufferInfo.size > 0) {
                     ByteBuffer codecBuffer = codec.getOutputBuffer(outputBufferId);
+
+                    // Skip writing trailing output buffers when a reset is pending.
+                    // After signalEndOfInputStream(), the encoder may flush remaining
+                    // buffers that contain incomplete or corrupted NAL units (especially
+                    // on Samsung Exynos encoders during rotation), which could cause the
+                    // client to disconnect (broken pipe).
+                    if (reset.hasPendingReset()) {
+                        Ln.d("Skipping packet write during pending reset");
+                        continue;
+                    }
 
                     boolean isConfig = (bufferInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0;
                     if (!isConfig) {

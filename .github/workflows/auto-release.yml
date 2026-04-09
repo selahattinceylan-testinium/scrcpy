@@ -21,7 +21,7 @@ jobs:
         id: version
         run: |
           # Read the version from meson.build
-          BASE_VERSION=$(grep -oP "version:\s*'\K[^']+" meson.build || true)
+          BASE_VERSION=$(grep -m1 -oP "version:\s*'\K[^']+" meson.build || true)
           if [[ -z "$BASE_VERSION" ]]; then
             echo "::error::Could not extract version from meson.build"
             exit 1

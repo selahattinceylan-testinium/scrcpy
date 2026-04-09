@@ -167,12 +167,12 @@ public class SurfaceEncoder implements AsyncProcessor {
                     }
                 } catch (IllegalStateException | IllegalArgumentException | IOException e) {
                     if (IO.isBrokenPipe(e)) {
-                        if (reset.hasPendingReset()) {
-                            // Broken pipe during rotation transition: the client may have been
-                            // disrupted by trailing encoder output during rotation. Allow the
-                            // rotation loop to complete one more iteration so the new encoder
-                            // gets a chance to write to the socket cleanly.
-                            Ln.w("Broken pipe during pending reset, retrying after rotation");
+                        if (reset.hasPendingReset() || wasReset) {
+                            // Broken pipe during or just after a rotation transition: the client
+                            // may have been disrupted by trailing encoder output during rotation.
+                            // Allow the rotation loop to complete one more iteration so the new
+                            // encoder gets a chance to write to the socket cleanly.
+                            Ln.w("Broken pipe during rotation transition, retrying");
                             alive = true;
                             continue;
                         }

@@ -108,7 +108,9 @@ public class SurfaceEncoder implements AsyncProcessor {
                     // Recreate the MediaCodec to avoid potential encoder state issues after rotation.
                     // Some devices (e.g. Samsung Exynos) do not properly handle reconfiguration of
                     // the same MediaCodec instance with a different resolution after stop/reset.
-                    mediaCodec.release();
+                    MediaCodec oldCodec = mediaCodec;
+                    mediaCodec = null;
+                    oldCodec.release();
                     mediaCodec = createMediaCodec(codec, encoderName);
 
                     prepareWithRetry();
@@ -198,7 +200,9 @@ public class SurfaceEncoder implements AsyncProcessor {
                 }
             } while (alive);
         } finally {
-            mediaCodec.release();
+            if (mediaCodec != null) {
+                mediaCodec.release();
+            }
             capture.release();
         }
     }

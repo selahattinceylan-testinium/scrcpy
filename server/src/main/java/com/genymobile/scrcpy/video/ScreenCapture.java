@@ -81,6 +81,7 @@ public class ScreenCapture extends SurfaceCapture {
         }
 
         Size displaySize = displayInfo.getSize();
+        Ln.d("Preparing capture: displaySize=" + displaySize + ", rotation=" + displayInfo.getRotation());
         displaySizeMonitor.setSessionDisplaySize(displaySize);
 
         if (captureOrientationLock == Orientation.Lock.LockedInitial) {
@@ -102,6 +103,7 @@ public class ScreenCapture extends SurfaceCapture {
 
         transform = filter.getInverseTransform();
         videoSize = filter.getOutputSize().limit(maxSize).round8();
+        Ln.d("Capture prepared: videoSize=" + videoSize + ", hasTransform=" + (transform != null));
     }
 
     @Override
@@ -119,6 +121,7 @@ public class ScreenCapture extends SurfaceCapture {
         if (transform != null) {
             // If there is a filter, it must receive the full display content
             inputSize = displayInfo.getSize();
+            Ln.d("Starting capture with OpenGL filter: inputSize=" + inputSize + ", videoSize=" + videoSize);
             assert glRunner == null;
             OpenGLFilter glFilter = new AffineOpenGLFilter(transform);
             glRunner = new OpenGLRunner(glFilter);
@@ -126,6 +129,7 @@ public class ScreenCapture extends SurfaceCapture {
         } else {
             // If there is no filter, the display must be rendered at target video size directly
             inputSize = videoSize;
+            Ln.d("Starting capture without filter: inputSize=" + inputSize);
         }
 
         IOException lastException = null;

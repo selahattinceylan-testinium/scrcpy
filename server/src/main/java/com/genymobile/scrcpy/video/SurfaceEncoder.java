@@ -74,7 +74,10 @@ public class SurfaceEncoder implements AsyncProcessor {
             boolean headerWritten = false;
 
             do {
-                reset.consumeReset(); // If a capture reset was requested, it is implicitly fulfilled
+                boolean wasReset = reset.consumeReset(); // If a capture reset was requested, it is implicitly fulfilled
+                if (wasReset) {
+                    Ln.d("Capture reset consumed, re-preparing capture");
+                }
                 capture.prepare();
                 Size size = capture.getSize();
                 if (!headerWritten) {
@@ -105,25 +108,33 @@ public class SurfaceEncoder implements AsyncProcessor {
                     reset.setRunningMediaCodec(mediaCodec);
 
                     if (stopped.get()) {
+                        Ln.d("Encoder stopped before encoding started");
                         alive = false;
                     } else {
                         boolean resetRequested = reset.consumeReset();
-                        if (!resetRequested) {
+                        if (resetRequested) {
+                            Ln.d("Reset requested before encoding, skipping encode and restarting");
+                        } else {
                             // If a reset is requested during encode(), it will interrupt the encoding by an EOS
                             encode(mediaCodec, streamer);
                         }
                         // The capture might have been closed internally (for example if the camera is disconnected)
                         alive = !stopped.get() && !capture.isClosed();
+                        if (!alive) {
+                            Ln.d("Streaming loop ending: stopped=" + stopped.get() + ", closed=" + capture.isClosed());
+                        }
                     }
                 } catch (IllegalStateException | IllegalArgumentException | IOException e) {
                     if (IO.isBrokenPipe(e)) {
                         // Do not retry on broken pipe, which is expected on close because the socket is closed by the client
                         throw e;
                     }
-                    Ln.e("Capture/encoding error: " + e.getClass().getName() + ": " + e.getMessage());
+                    Ln.e("Capture/encoding error (consecutiveErrors=" + consecutiveErrors + "): " + e.getClass().getName() + ": " + e.getMessage());
                     if (!prepareRetry(size)) {
+                        Ln.e("Giving up after " + consecutiveErrors + " consecutive errors");
                         throw e;
                     }
+                    Ln.d("Retrying capture/encoding (consecutiveErrors=" + consecutiveErrors + ")");
                     alive = true;
                 } finally {
                     reset.setRunningMediaCodec(null);
@@ -305,6 +316,8 @@ public class SurfaceEncoder implements AsyncProcessor {
                 if (!IO.isBrokenPipe(e)) {
                     Ln.e("Video encoding error", e);
                 }
+            } catch (RuntimeException e) {
+                Ln.e("Unexpected error during video encoding", e);
             } finally {
                 Ln.d("Screen streaming stopped");
                 listener.onTerminated(true);

@@ -9,8 +9,12 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  # Determine the release version and create a git tag
+  determine-version:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -63,11 +67,498 @@ jobs:
           git tag -a "${{ steps.version.outputs.tag }}" -m "Release ${{ steps.version.outputs.tag }}"
           git push origin "${{ steps.version.outputs.tag }}"
 
+  # Build the Android server component
+  build-scrcpy-server:
+    needs: determine-version
+    runs-on: ubuntu-latest
+    env:
+      GRADLE: gradle
+      VERSION: ${{ needs.determine-version.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Build
+        run: release/build_server.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scrcpy-server
+          path: release/work/build-server/server/scrcpy-server
+
+  # Build Linux x86_64 client
+  build-linux-x86_64:
+    needs: determine-version
+    runs-on: ubuntu-22.04
+    env:
+      VERSION: ${{ needs.determine-version.outputs.tag }}
+    steps:
+      - name: Check architecture
+        run: |
+            arch=$(uname -m)
+            if [[ "$arch" != x86_64 ]]
+            then
+                echo "Unexpected architecture: $arch" >&2
+                exit 1
+            fi
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y meson ninja-build nasm ffmpeg libsdl2-2.0-0 \
+             libsdl2-dev libavcodec-dev libavdevice-dev libavformat-dev \
+             libavutil-dev libswresample-dev libusb-1.0-0 libusb-1.0-0-dev \
+             libv4l-dev
+
+      - name: Build
+        run: release/build_linux.sh x86_64
+
+      # upload-artifact does not preserve permissions
+      - name: Tar
+        run: |
+            cd release/work/build-linux-x86_64
+            mkdir dist-tar
+            cd dist-tar
+            tar -C .. -cvf dist.tar.gz dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-linux-x86_64-intermediate
+          path: release/work/build-linux-x86_64/dist-tar/
+
+  # Build Windows 32-bit client
+  build-win32:
+    needs: determine-version
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.determine-version.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y meson ninja-build nasm ffmpeg libsdl2-2.0-0 \
+             libsdl2-dev libavcodec-dev libavdevice-dev libavformat-dev \
+             libavutil-dev libswresample-dev libusb-1.0-0 libusb-1.0-0-dev \
+             mingw-w64 mingw-w64-tools libz-mingw-w64-dev
+
+      - name: Build
+        run: release/build_windows.sh 32
+
+      # upload-artifact does not preserve permissions
+      - name: Tar
+        run: |
+            cd release/work/build-win32
+            mkdir dist-tar
+            cd dist-tar
+            tar -C .. -cvf dist.tar.gz dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-win32-intermediate
+          path: release/work/build-win32/dist-tar/
+
+  # Build Windows 64-bit client
+  build-win64:
+    needs: determine-version
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.determine-version.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y meson ninja-build nasm ffmpeg libsdl2-2.0-0 \
+             libsdl2-dev libavcodec-dev libavdevice-dev libavformat-dev \
+             libavutil-dev libswresample-dev libusb-1.0-0 libusb-1.0-0-dev \
+             mingw-w64 mingw-w64-tools libz-mingw-w64-dev
+
+      - name: Build
+        run: release/build_windows.sh 64
+
+      # upload-artifact does not preserve permissions
+      - name: Tar
+        run: |
+            cd release/work/build-win64
+            mkdir dist-tar
+            cd dist-tar
+            tar -C .. -cvf dist.tar.gz dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-win64-intermediate
+          path: release/work/build-win64/dist-tar/
+
+  # Build macOS aarch64 client
+  build-macos-aarch64:
+    needs: determine-version
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.determine-version.outputs.tag }}
+    steps:
+      - name: Check architecture
+        run: |
+            arch=$(uname -m)
+            if [[ "$arch" != arm64 ]]
+            then
+                echo "Unexpected architecture: $arch" >&2
+                exit 1
+            fi
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+            brew install meson nasm libiconv zlib automake autoconf libtool
+
+      - name: Build
+        env:
+          MACOSX_DEPLOYMENT_TARGET: 10.13
+        run: release/build_macos.sh aarch64
+
+      # upload-artifact does not preserve permissions
+      - name: Tar
+        run: |
+            cd release/work/build-macos-aarch64
+            mkdir dist-tar
+            cd dist-tar
+            tar -C .. -cvf dist.tar.gz dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-macos-aarch64-intermediate
+          path: release/work/build-macos-aarch64/dist-tar/
+
+  # Build macOS x86_64 client
+  build-macos-x86_64:
+    needs: determine-version
+    runs-on: macos-15-intel
+    env:
+      VERSION: ${{ needs.determine-version.outputs.tag }}
+    steps:
+      - name: Check architecture
+        run: |
+            arch=$(uname -m)
+            if [[ "$arch" != x86_64 ]]
+            then
+                echo "Unexpected architecture: $arch" >&2
+                exit 1
+            fi
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install meson nasm libiconv zlib automake
+             # autoconf and libtool are already installed on macos-15-intel
+
+      - name: Build
+        env:
+          MACOSX_DEPLOYMENT_TARGET: 10.13
+        run: release/build_macos.sh x86_64
+
+      # upload-artifact does not preserve permissions
+      - name: Tar
+        run: |
+            cd release/work/build-macos-x86_64
+            mkdir dist-tar
+            cd dist-tar
+            tar -C .. -cvf dist.tar.gz dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-macos-x86_64-intermediate
+          path: release/work/build-macos-x86_64/dist-tar/
+
+  # Package Linux x86_64 (combine server + client)
+  package-linux-x86_64:
+    needs:
+      - determine-version
+      - build-scrcpy-server
+      - build-linux-x86_64
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.determine-version.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download scrcpy-server
+        uses: actions/download-artifact@v4
+        with:
+          name: scrcpy-server
+          path: release/work/build-server/server/
+
+      - name: Download build-linux-x86_64
+        uses: actions/download-artifact@v4
+        with:
+          name: build-linux-x86_64-intermediate
+          path: release/work/build-linux-x86_64/dist-tar/
+
+      # upload-artifact does not preserve permissions
+      - name: Detar
+        run: |
+            cd release/work/build-linux-x86_64
+            tar xf dist-tar/dist.tar.gz
+
+      - name: Package
+        run: release/package_client.sh linux-x86_64 tar.gz
+
+      - name: Upload release
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-x86_64
+          path: release/output/
+
+  # Package Windows 32-bit
+  package-win32:
+    needs:
+      - determine-version
+      - build-scrcpy-server
+      - build-win32
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.determine-version.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download scrcpy-server
+        uses: actions/download-artifact@v4
+        with:
+          name: scrcpy-server
+          path: release/work/build-server/server/
+
+      - name: Download build-win32
+        uses: actions/download-artifact@v4
+        with:
+          name: build-win32-intermediate
+          path: release/work/build-win32/dist-tar/
+
+      # upload-artifact does not preserve permissions
+      - name: Detar
+        run: |
+            cd release/work/build-win32
+            tar xf dist-tar/dist.tar.gz
+
+      - name: Package
+        run: release/package_client.sh win32 zip
+
+      - name: Upload release
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-win32
+          path: release/output/
+
+  # Package Windows 64-bit
+  package-win64:
+    needs:
+      - determine-version
+      - build-scrcpy-server
+      - build-win64
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.determine-version.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download scrcpy-server
+        uses: actions/download-artifact@v4
+        with:
+          name: scrcpy-server
+          path: release/work/build-server/server/
+
+      - name: Download build-win64
+        uses: actions/download-artifact@v4
+        with:
+          name: build-win64-intermediate
+          path: release/work/build-win64/dist-tar/
+
+      # upload-artifact does not preserve permissions
+      - name: Detar
+        run: |
+            cd release/work/build-win64
+            tar xf dist-tar/dist.tar.gz
+
+      - name: Package
+        run: release/package_client.sh win64 zip
+
+      - name: Upload release
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-win64
+          path: release/output/
+
+  # Package macOS aarch64
+  package-macos-aarch64:
+    needs:
+      - determine-version
+      - build-scrcpy-server
+      - build-macos-aarch64
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.determine-version.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download scrcpy-server
+        uses: actions/download-artifact@v4
+        with:
+          name: scrcpy-server
+          path: release/work/build-server/server/
+
+      - name: Download build-macos-aarch64
+        uses: actions/download-artifact@v4
+        with:
+          name: build-macos-aarch64-intermediate
+          path: release/work/build-macos-aarch64/dist-tar/
+
+      # upload-artifact does not preserve permissions
+      - name: Detar
+        run: |
+            cd release/work/build-macos-aarch64
+            tar xf dist-tar/dist.tar.gz
+
+      - name: Package
+        run: release/package_client.sh macos-aarch64 tar.gz
+
+      - name: Upload release
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-aarch64
+          path: release/output/
+
+  # Package macOS x86_64
+  package-macos-x86_64:
+    needs:
+      - determine-version
+      - build-scrcpy-server
+      - build-macos-x86_64
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.determine-version.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download scrcpy-server
+        uses: actions/download-artifact@v4
+        with:
+          name: scrcpy-server
+          path: release/work/build-server/server/
+
+      - name: Download build-macos-x86_64
+        uses: actions/download-artifact@v4
+        with:
+          name: build-macos-x86_64-intermediate
+          path: release/work/build-macos-x86_64/dist-tar/
+
+      # upload-artifact does not preserve permissions
+      - name: Detar
+        run: |
+            cd release/work/build-macos-x86_64
+            tar xf dist-tar/dist.tar.gz
+
+      - name: Package
+        run: release/package_client.sh macos-x86_64 tar.gz
+
+      - name: Upload release
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-x86_64
+          path: release/output/
+
+  # Final release: collect all artifacts, generate checksums, and publish
+  release:
+    needs:
+      - determine-version
+      - build-scrcpy-server
+      - package-linux-x86_64
+      - package-win32
+      - package-win64
+      - package-macos-aarch64
+      - package-macos-x86_64
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.determine-version.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download scrcpy-server
+        uses: actions/download-artifact@v4
+        with:
+          name: scrcpy-server
+          path: release/work/build-server/server/
+
+      - name: Download release-linux-x86_64
+        uses: actions/download-artifact@v4
+        with:
+          name: release-linux-x86_64
+          path: release/output/
+
+      - name: Download release-win32
+        uses: actions/download-artifact@v4
+        with:
+          name: release-win32
+          path: release/output/
+
+      - name: Download release-win64
+        uses: actions/download-artifact@v4
+        with:
+          name: release-win64
+          path: release/output/
+
+      - name: Download release-macos-aarch64
+        uses: actions/download-artifact@v4
+        with:
+          name: release-macos-aarch64
+          path: release/output/
+
+      - name: Download release-macos-x86_64
+        uses: actions/download-artifact@v4
+        with:
+          name: release-macos-x86_64
+          path: release/output/
+
+      - name: Package server
+        run: release/package_server.sh
+
+      - name: Generate checksums
+        run: release/generate_checksums.sh
+
+      - name: List release artifacts
+        run: ls -la release/output/
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: "scrcpy ${{ steps.version.outputs.tag }}"
+          tag_name: ${{ needs.determine-version.outputs.tag }}
+          name: "scrcpy ${{ needs.determine-version.outputs.tag }}"
           generate_release_notes: true
           draft: false
           prerelease: false
+          files: release/output/*

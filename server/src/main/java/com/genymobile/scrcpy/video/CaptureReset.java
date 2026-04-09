@@ -17,6 +17,16 @@ public class CaptureReset implements SurfaceCapture.CaptureListener {
         return reset.getAndSet(false);
     }
 
+    /**
+     * Check if a reset is pending without consuming it.
+     * <p/>
+     * This is useful for the encode loop to detect a pending reset when the EOS signal might not have been delivered successfully
+     * (for example if signalEndOfInputStream() threw an IllegalStateException).
+     */
+    public boolean hasPendingReset() {
+        return reset.get();
+    }
+
     public synchronized void reset() {
         reset.set(true);
         Ln.d("Capture reset requested");

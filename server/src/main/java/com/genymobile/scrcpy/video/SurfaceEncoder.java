@@ -30,6 +30,9 @@ public class SurfaceEncoder implements AsyncProcessor {
 
     private static final int DEFAULT_I_FRAME_INTERVAL = 10; // seconds
     private static final int REPEAT_FRAME_DELAY_US = 100_000; // repeat after 100ms
+    private static final long DEQUEUE_TIMEOUT_US = 1_000_000; // 1 second
+    private static final int PREPARE_RETRY_DELAY_MS = 200;
+    private static final int PREPARE_RETRY_COUNT = 3;
     private static final String KEY_MAX_FPS_TO_ENCODER = "max-fps-to-encoder";
 
     // Keep the values in descending order
@@ -62,6 +65,29 @@ public class SurfaceEncoder implements AsyncProcessor {
         this.downsizeOnError = options.getDownsizeOnError();
     }
 
+    /**
+     * Retry capture.prepare() with delays after a reset.
+     * <p/>
+     * On some devices (e.g. Samsung), the display may be temporarily unavailable during rotation,
+     * causing prepare() to fail with ConfigurationException. Retrying after a short delay allows
+     * the display to become available again.
+     */
+    private void prepareWithRetry() throws ConfigurationException, IOException {
+        for (int attempt = 1; attempt <= PREPARE_RETRY_COUNT; attempt++) {
+            try {
+                capture.prepare();
+                return;
+            } catch (ConfigurationException e) {
+                if (attempt < PREPARE_RETRY_COUNT) {
+                    Ln.w("Prepare failed after reset (attempt " + attempt + "/" + PREPARE_RETRY_COUNT + "), retrying...");
+                    SystemClock.sleep(PREPARE_RETRY_DELAY_MS);
+                } else {
+                    throw e;
+                }
+            }
+        }
+    }
+
     private void streamCapture() throws IOException, ConfigurationException {
         Codec codec = streamer.getCodec();
         MediaCodec mediaCodec = createMediaCodec(codec, encoderName);
@@ -78,7 +104,11 @@ public class SurfaceEncoder implements AsyncProcessor {
                 if (wasReset) {
                     Ln.d("Capture reset consumed, re-preparing capture");
                 }
-                capture.prepare();
+                if (wasReset) {
+                    prepareWithRetry();
+                } else {
+                    capture.prepare();
+                }
                 Size size = capture.getSize();
                 if (!headerWritten) {
                     streamer.writeVideoHeader(size);
@@ -148,7 +178,11 @@ public class SurfaceEncoder implements AsyncProcessor {
                             // ignore (just in case)
                         }
                     }
-                    mediaCodec.reset();
+                    try {
+                        mediaCodec.reset();
+                    } catch (IllegalStateException e) {
+                        Ln.w("Could not reset MediaCodec: " + e.getMessage());
+                    }
                     if (surface != null) {
                         surface.release();
                     }
@@ -212,10 +246,19 @@ public class SurfaceEncoder implements AsyncProcessor {
     private void encode(MediaCodec codec, Streamer streamer) throws IOException {
         MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
 
-        boolean eos;
+        boolean eos = false;
         do {
-            int outputBufferId = codec.dequeueOutputBuffer(bufferInfo, -1);
+            int outputBufferId = codec.dequeueOutputBuffer(bufferInfo, DEQUEUE_TIMEOUT_US);
             try {
+                if (outputBufferId == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                    // No output available within the timeout
+                    if (stopped.get() || reset.hasPendingReset()) {
+                        // Either stopped or a reset is pending but the EOS might not have been delivered
+                        Ln.d("Exiting encode loop: stopped=" + stopped.get() + ", pendingReset=" + reset.hasPendingReset());
+                        return;
+                    }
+                    continue;
+                }
                 eos = (bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
                 // On EOS, there might be data or not, depending on bufferInfo.size
                 if (outputBufferId >= 0 && bufferInfo.size > 0) {

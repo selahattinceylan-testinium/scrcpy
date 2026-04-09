@@ -33,6 +33,7 @@ public class SurfaceEncoder implements AsyncProcessor {
     private static final long DEQUEUE_TIMEOUT_US = 1_000_000; // 1 second
     private static final int PREPARE_RETRY_DELAY_MS = 200;
     private static final int PREPARE_RETRY_COUNT = 3;
+    private static final int POST_RESET_SETTLE_DELAY_MS = 100;
     private static final String KEY_MAX_FPS_TO_ENCODER = "max-fps-to-encoder";
 
     // Keep the values in descending order
@@ -103,9 +104,17 @@ public class SurfaceEncoder implements AsyncProcessor {
                 boolean wasReset = reset.consumeReset(); // If a capture reset was requested, it is implicitly fulfilled
                 if (wasReset) {
                     Ln.d("Capture reset consumed, re-preparing capture");
-                }
-                if (wasReset) {
+
+                    // Recreate the MediaCodec to avoid potential encoder state issues after rotation.
+                    // Some devices (e.g. Samsung Exynos) do not properly handle reconfiguration of
+                    // the same MediaCodec instance with a different resolution after stop/reset.
+                    mediaCodec.release();
+                    mediaCodec = createMediaCodec(codec, encoderName);
+
                     prepareWithRetry();
+
+                    // Brief delay to let the display settle after rotation
+                    SystemClock.sleep(POST_RESET_SETTLE_DELAY_MS);
                 } else {
                     capture.prepare();
                 }
@@ -260,7 +269,13 @@ public class SurfaceEncoder implements AsyncProcessor {
                     continue;
                 }
                 eos = (bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
-                // On EOS, there might be data or not, depending on bufferInfo.size
+                if (eos) {
+                    // Do not write EOS buffer data to the stream: it may contain incomplete or
+                    // corrupted NAL units (especially on Samsung Exynos encoders during rotation),
+                    // which could cause the client to disconnect.
+                    Ln.d("EOS received, exiting encode loop");
+                    break;
+                }
                 if (outputBufferId >= 0 && bufferInfo.size > 0) {
                     ByteBuffer codecBuffer = codec.getOutputBuffer(outputBufferId);
 
@@ -354,10 +369,13 @@ public class SurfaceEncoder implements AsyncProcessor {
                 streamCapture();
             } catch (ConfigurationException e) {
                 // Do not print stack trace, a user-friendly error-message has already been logged
+                Ln.d("Streaming stopped due to configuration error");
             } catch (IOException e) {
                 // Broken pipe is expected on close, because the socket is closed by the client
                 if (!IO.isBrokenPipe(e)) {
                     Ln.e("Video encoding error", e);
+                } else {
+                    Ln.d("Streaming stopped due to broken pipe (client disconnected)");
                 }
             } catch (RuntimeException e) {
                 Ln.e("Unexpected error during video encoding", e);

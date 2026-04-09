@@ -270,7 +270,7 @@ jobs:
 
       - name: Install dependencies
         run: brew install meson nasm libiconv zlib automake
-             # autoconf and libtool are already installed on macos-13
+             # autoconf and libtool are already installed on macos-15-intel
 
       - name: Build
         env:

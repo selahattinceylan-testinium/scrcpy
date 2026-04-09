@@ -111,9 +111,7 @@ public class DisplaySizeMonitor {
         if (di == null) {
             Ln.w("DisplayInfo for " + displayId + " cannot be retrieved");
             // We can't compare with the current size, so reset unconditionally
-            if (Ln.isEnabled(Ln.Level.VERBOSE)) {
-                Ln.v("DisplaySizeMonitor: requestReset(): " + getSessionDisplaySize() + " -> (unknown)");
-            }
+            Ln.d("DisplaySizeMonitor: requestReset(): " + getSessionDisplaySize() + " -> (unknown)");
             setSessionDisplaySize(null);
             listener.onDisplaySizeChanged();
         } else {
@@ -126,15 +124,13 @@ public class DisplaySizeMonitor {
             // .equals() also works if sessionDisplaySize == null
             if (!size.equals(sessionDisplaySize)) {
                 // Reset only if the size is different
-                if (Ln.isEnabled(Ln.Level.VERBOSE)) {
-                    Ln.v("DisplaySizeMonitor: requestReset(): " + sessionDisplaySize + " -> " + size);
-                }
+                Ln.d("DisplaySizeMonitor: size changed: " + sessionDisplaySize + " -> " + size + " (rotation=" + di.getRotation() + ")");
                 // Set the new size immediately, so that a future onDisplayChanged() event called before the asynchronous prepare()
                 // considers that the current size is the requested size (to avoid a duplicate requestReset())
                 setSessionDisplaySize(size);
                 listener.onDisplaySizeChanged();
-            } else if (Ln.isEnabled(Ln.Level.VERBOSE)) {
-                Ln.v("DisplaySizeMonitor: Size not changed (" + size + "): do not requestReset()");
+            } else {
+                Ln.d("DisplaySizeMonitor: size not changed (" + size + ", rotation=" + di.getRotation() + "): no reset");
             }
         }
     }

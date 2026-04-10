@@ -28,7 +28,11 @@ import android.annotation.SuppressLint;
 import android.os.Build;
 import android.os.Looper;
 
+import android.net.LocalServerSocket;
+import android.net.LocalSocket;
+
 import java.io.File;
+import java.io.FileDescriptor;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -151,6 +155,23 @@ public final class Server {
                     surfaceCapture = new CameraCapture(options);
                 }
                 SurfaceEncoder surfaceEncoder = new SurfaceEncoder(surfaceCapture, videoStreamer, options);
+
+                if (tunnelForward) {
+                    // Socket name must match DesktopConnection.getSocketName()
+                    String socketName = scid == -1 ? "scrcpy" : "scrcpy" + String.format("_%08x", scid);
+                    boolean dummyByte = options.getSendDummyByte();
+                    surfaceEncoder.setSocketReconnector(() -> {
+                        Ln.i("Opening new server socket '" + socketName + "' for client reconnection...");
+                        try (LocalServerSocket serverSocket = new LocalServerSocket(socketName)) {
+                            LocalSocket newSocket = serverSocket.accept();
+                            if (dummyByte) {
+                                newSocket.getOutputStream().write(0);
+                            }
+                            return newSocket.getFileDescriptor();
+                        }
+                    });
+                }
+
                 asyncProcessors.add(surfaceEncoder);
 
                 if (controller != null) {

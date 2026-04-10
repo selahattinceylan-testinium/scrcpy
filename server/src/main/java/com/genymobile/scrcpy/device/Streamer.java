@@ -17,7 +17,7 @@ public final class Streamer {
     private static final long PACKET_FLAG_CONFIG = 1L << 63;
     private static final long PACKET_FLAG_KEY_FRAME = 1L << 62;
 
-    private final FileDescriptor fd;
+    private FileDescriptor fd;
     private final Codec codec;
     private final boolean sendCodecMeta;
     private final boolean sendFrameMeta;
@@ -33,6 +33,10 @@ public final class Streamer {
 
     public Codec getCodec() {
         return codec;
+    }
+
+    public void setFd(FileDescriptor fd) {
+        this.fd = fd;
     }
 
     public void writeAudioHeader() throws IOException {

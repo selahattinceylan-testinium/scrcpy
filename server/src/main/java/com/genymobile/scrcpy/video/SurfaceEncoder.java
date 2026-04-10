@@ -21,6 +21,7 @@ import android.os.Looper;
 import android.os.SystemClock;
 import android.view.Surface;
 
+import java.io.FileDescriptor;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -29,6 +30,14 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class SurfaceEncoder implements AsyncProcessor {
+
+    /**
+     * Callback to re-establish a socket connection when the client disconnects during rotation.
+     * Returns the new FileDescriptor for the video stream, or null if reconnection is not supported.
+     */
+    public interface SocketReconnector {
+        FileDescriptor reconnect() throws IOException;
+    }
 
     private static final int DEFAULT_I_FRAME_INTERVAL = 10; // seconds
     private static final int REPEAT_FRAME_DELAY_US = 100_000; // repeat after 100ms
@@ -50,6 +59,8 @@ public class SurfaceEncoder implements AsyncProcessor {
     private final float maxFps;
     private final boolean downsizeOnError;
 
+    private SocketReconnector socketReconnector;
+
     private boolean firstFrameSent;
     private int consecutiveErrors;
 
@@ -69,6 +80,10 @@ public class SurfaceEncoder implements AsyncProcessor {
         this.codecOptions = options.getVideoCodecOptions();
         this.encoderName = options.getVideoEncoder();
         this.downsizeOnError = options.getDownsizeOnError();
+    }
+
+    public void setSocketReconnector(SocketReconnector reconnector) {
+        this.socketReconnector = reconnector;
     }
 
     private static String getStackTraceString(Throwable e) {
@@ -97,6 +112,31 @@ public class SurfaceEncoder implements AsyncProcessor {
                     throw e;
                 }
             }
+        }
+    }
+
+    /**
+     * Attempt to reconnect the socket after a broken pipe during rotation.
+     * Returns true if reconnection succeeded, false otherwise.
+     */
+    private boolean tryReconnect() {
+        if (socketReconnector == null) {
+            Ln.w("[DIAG] No socket reconnector configured, cannot reconnect");
+            return false;
+        }
+        try {
+            Ln.i("Client disconnected during rotation. Waiting for new client connection...");
+            FileDescriptor newFd = socketReconnector.reconnect();
+            if (newFd == null) {
+                Ln.w("[DIAG] Reconnector returned null fd");
+                return false;
+            }
+            streamer.setFd(newFd);
+            Ln.i("New client connected, resuming stream");
+            return true;
+        } catch (IOException e) {
+            Ln.e("[DIAG] Reconnection failed: " + e.getMessage());
+            return false;
         }
     }
 
@@ -207,10 +247,15 @@ public class SurfaceEncoder implements AsyncProcessor {
                         if (reset.hasPendingReset() || wasReset) {
                             if (rotationBrokenPipeRecovery) {
                                 // Socket is permanently broken after a rotation recovery attempt.
-                                // The client disconnected during rotation (e.g. due to corrupted
-                                // trailing encoder output before the reset was detected). There is
-                                // no point in retrying since the socket is dead.
-                                Ln.w("[DIAG] Broken pipe persists after rotation recovery, socket is dead. Exiting gracefully.");
+                                // Try to accept a new client connection.
+                                Ln.w("[DIAG] Broken pipe persists after rotation recovery, socket is dead. Attempting reconnect...");
+                                if (tryReconnect()) {
+                                    headerWritten = false; // must re-send video header to new client
+                                    rotationBrokenPipeRecovery = false;
+                                    alive = true;
+                                    continue;
+                                }
+                                Ln.w("Client disconnected during rotation and no reconnection available");
                                 alive = false;
                                 continue;
                             }
@@ -226,8 +271,15 @@ public class SurfaceEncoder implements AsyncProcessor {
                         }
                         if (rotationBrokenPipeRecovery) {
                             // The retry after rotation also got a broken pipe, but no new reset
-                            // is pending. The socket is permanently dead.
-                            Ln.w("[DIAG] Broken pipe after rotation recovery attempt (no pending reset). Socket is dead.");
+                            // is pending. Try to accept a new client connection.
+                            Ln.w("[DIAG] Broken pipe after rotation recovery attempt (no pending reset). Attempting reconnect...");
+                            if (tryReconnect()) {
+                                headerWritten = false;
+                                rotationBrokenPipeRecovery = false;
+                                alive = true;
+                                continue;
+                            }
+                            Ln.w("Client disconnected during rotation and no reconnection available");
                             alive = false;
                             continue;
                         }
@@ -399,7 +451,6 @@ public class SurfaceEncoder implements AsyncProcessor {
                             return;
                         }
                         Ln.w("[DIAG] writePacket broken pipe with NO pending reset — propagating exception");
-                        Ln.w("[DIAG] Full stack trace:\n" + getStackTraceString(e));
                         throw e;
                     }
                 }

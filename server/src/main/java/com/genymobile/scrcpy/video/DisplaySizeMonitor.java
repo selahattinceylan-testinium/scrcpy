@@ -124,7 +124,8 @@ public class DisplaySizeMonitor {
             // .equals() also works if sessionDisplaySize == null
             if (!size.equals(sessionDisplaySize)) {
                 // Reset only if the size is different
-                Ln.d("DisplaySizeMonitor: size changed: " + sessionDisplaySize + " -> " + size + " (rotation=" + di.getRotation() + ")");
+                Ln.d("DisplaySizeMonitor: size changed: " + sessionDisplaySize + " -> " + size
+                        + " (rotation=" + di.getRotation() + ", thread=" + Thread.currentThread().getName() + ")");
                 // Set the new size immediately, so that a future onDisplayChanged() event called before the asynchronous prepare()
                 // considers that the current size is the requested size (to avoid a duplicate requestReset())
                 setSessionDisplaySize(size);

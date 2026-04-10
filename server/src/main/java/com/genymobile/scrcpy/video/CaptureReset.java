@@ -29,11 +29,12 @@ public class CaptureReset implements SurfaceCapture.CaptureListener {
 
     public synchronized void reset() {
         reset.set(true);
-        Ln.d("Capture reset requested");
+        Ln.d("[DIAG] Capture reset requested (thread=" + Thread.currentThread().getName() + ")");
         if (runningMediaCodec != null) {
             Ln.d("Signaling EOS to interrupt running MediaCodec");
             try {
                 runningMediaCodec.signalEndOfInputStream();
+                Ln.d("[DIAG] signalEndOfInputStream() succeeded");
             } catch (IllegalStateException e) {
                 Ln.d("Could not signal EOS (MediaCodec not in running state): " + e.getMessage());
             }
@@ -48,6 +49,7 @@ public class CaptureReset implements SurfaceCapture.CaptureListener {
 
     @Override
     public void onInvalidated() {
+        Ln.d("[DIAG] onInvalidated() called from thread=" + Thread.currentThread().getName());
         reset();
     }
 }

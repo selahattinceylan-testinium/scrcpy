@@ -418,6 +418,7 @@ public class SurfaceEncoder implements AsyncProcessor {
             try {
                 if (outputBufferId == MediaCodec.INFO_TRY_AGAIN_LATER) {
                     // No output available within the timeout
+                    Ln.d("[DIAG] dequeueOutputBuffer: TRY_AGAIN_LATER (no output within " + DEQUEUE_TIMEOUT_US + "us)");
                     if (stopped.get() || reset.hasPendingReset()) {
                         // Either stopped or a reset is pending but the EOS might not have been delivered
                         Ln.d("Exiting encode loop: stopped=" + stopped.get() + ", pendingReset=" + reset.hasPendingReset()
@@ -435,6 +436,7 @@ public class SurfaceEncoder implements AsyncProcessor {
                     break;
                 }
                 if (outputBufferId >= 0 && bufferInfo.size > 0) {
+                    Ln.d("[DIAG] dequeueOutputBuffer: got buffer id=" + outputBufferId + " size=" + bufferInfo.size);
                     ByteBuffer codecBuffer = codec.getOutputBuffer(outputBufferId);
 
                     boolean isConfig = (bufferInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0;

@@ -93,4 +93,14 @@ public abstract class SurfaceCapture {
      * The capture implementation is free to ignore the request and do nothing.
      */
     public abstract void requestInvalidate();
+
+    /**
+     * Request the capture to re-render the current frame to the encoder surface.
+     * This forces the encoder to produce output even when the screen content hasn't changed.
+     * <p>
+     * The default implementation does nothing. Subclasses may override to provide refresh support.
+     */
+    public void requestRefresh() {
+        // Do nothing by default
+    }
 }

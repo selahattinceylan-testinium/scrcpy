@@ -49,6 +49,7 @@ public class ScreenCapture extends SurfaceCapture {
 
     private AffineMatrix transform;
     private OpenGLRunner glRunner;
+    private Surface currentSurface;
 
     public ScreenCapture(VirtualDisplayListener vdListener, Options options) {
         this.vdListener = vdListener;
@@ -180,6 +181,8 @@ public class ScreenCapture extends SurfaceCapture {
             }
             vdListener.onNewVirtualDisplay(virtualDisplayId, positionMapper);
         }
+
+        this.currentSurface = surface;
     }
 
     @Override
@@ -237,5 +240,19 @@ public class ScreenCapture extends SurfaceCapture {
     @Override
     public void requestInvalidate() {
         invalidate();
+    }
+
+    @Override
+    public void requestRefresh() {
+        if (virtualDisplay != null && currentSurface != null) {
+            virtualDisplay.setSurface(currentSurface);
+        } else if (display != null && currentSurface != null) {
+            SurfaceControl.openTransaction();
+            try {
+                SurfaceControl.setDisplaySurface(display, currentSurface);
+            } finally {
+                SurfaceControl.closeTransaction();
+            }
+        }
     }
 }

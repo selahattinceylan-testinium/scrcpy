@@ -17,7 +17,6 @@ import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.os.Build;
-import android.os.Bundle;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.view.Surface;
@@ -385,13 +384,11 @@ public class SurfaceEncoder implements AsyncProcessor {
         long packetsThisSession = 0;
         long packetsSkipped = 0;
 
-        // Periodically request a sync frame from the encoder to force output
+        // Periodically refresh the capture to force the encoder to produce output
         // even when the screen content hasn't changed
         AtomicBoolean encoding = new AtomicBoolean(true);
-        Thread invalidateThread = new Thread(() -> {
+        Thread refreshThread = new Thread(() -> {
             Ln.d("[DIAG] Frame refresh thread running");
-            Bundle params = new Bundle();
-            params.putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0);
             while (encoding.get()) {
                 try {
                     Thread.sleep(frameRefreshIntervalMs);
@@ -402,16 +399,16 @@ public class SurfaceEncoder implements AsyncProcessor {
                     break;
                 }
                 try {
-                    codec.setParameters(params);
-                    Ln.d("[DIAG] Requested sync frame from encoder");
+                    capture.requestRefresh();
+                    Ln.d("[DIAG] Requested capture refresh");
                 } catch (Exception e) {
                     Ln.d("[DIAG] Frame refresh thread stopping: " + e.getMessage());
                     break;
                 }
             }
         }, "frame-refresh");
-        invalidateThread.setDaemon(true);
-        invalidateThread.start();
+        refreshThread.setDaemon(true);
+        refreshThread.start();
         Ln.d("[DIAG] Frame refresh thread started (interval=" + frameRefreshIntervalMs + "ms)");
 
         boolean eos = false;
@@ -497,7 +494,7 @@ public class SurfaceEncoder implements AsyncProcessor {
         } while (!eos);
         } finally {
             encoding.set(false);
-            invalidateThread.interrupt();
+            refreshThread.interrupt();
         }
     }
 

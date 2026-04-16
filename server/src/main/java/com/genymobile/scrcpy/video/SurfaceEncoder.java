@@ -389,6 +389,7 @@ public class SurfaceEncoder implements AsyncProcessor {
         // even when the screen content hasn't changed
         AtomicBoolean encoding = new AtomicBoolean(true);
         Thread invalidateThread = new Thread(() -> {
+            Ln.d("[DIAG] Frame refresh thread running");
             Bundle params = new Bundle();
             params.putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0);
             while (encoding.get()) {
@@ -402,14 +403,16 @@ public class SurfaceEncoder implements AsyncProcessor {
                 }
                 try {
                     codec.setParameters(params);
+                    Ln.d("[DIAG] Requested sync frame from encoder");
                 } catch (Exception e) {
-                    // Codec may have been released
+                    Ln.d("[DIAG] Frame refresh thread stopping: " + e.getMessage());
                     break;
                 }
             }
         }, "frame-refresh");
         invalidateThread.setDaemon(true);
         invalidateThread.start();
+        Ln.d("[DIAG] Frame refresh thread started (interval=" + frameRefreshIntervalMs + "ms)");
 
         boolean eos = false;
         try {

@@ -245,8 +245,15 @@ public class ScreenCapture extends SurfaceCapture {
     @Override
     public void requestRefresh() {
         if (virtualDisplay != null && currentSurface != null) {
+            virtualDisplay.setSurface(null);
             virtualDisplay.setSurface(currentSurface);
         } else if (display != null && currentSurface != null) {
+            SurfaceControl.openTransaction();
+            try {
+                SurfaceControl.setDisplaySurface(display, null);
+            } finally {
+                SurfaceControl.closeTransaction();
+            }
             SurfaceControl.openTransaction();
             try {
                 SurfaceControl.setDisplaySurface(display, currentSurface);

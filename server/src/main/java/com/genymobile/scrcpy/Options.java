@@ -79,6 +79,7 @@ public class Options {
     private boolean sendFrameMeta = true; // send PTS so that the client may record properly
     private boolean sendDummyByte = true; // write a byte on start to detect connection issues
     private boolean sendCodecMeta = true; // write the codec metadata before the stream
+    private int frameRefreshIntervalMs = 500; // force a frame every N ms (0 to disable)
 
     public Ln.Level getLogLevel() {
         return logLevel;
@@ -286,6 +287,10 @@ public class Options {
 
     public boolean getSendCodecMeta() {
         return sendCodecMeta;
+    }
+
+    public int getFrameRefreshIntervalMs() {
+        return frameRefreshIntervalMs;
     }
 
     @SuppressWarnings("MethodLength")
@@ -502,6 +507,12 @@ public class Options {
                     break;
                 case "send_codec_meta":
                     options.sendCodecMeta = Boolean.parseBoolean(value);
+                    break;
+                case "frame_refresh_interval":
+                    options.frameRefreshIntervalMs = Integer.parseInt(value);
+                    if (options.frameRefreshIntervalMs < 0) {
+                        throw new IllegalArgumentException("Invalid frame_refresh_interval: " + options.frameRefreshIntervalMs);
+                    }
                     break;
                 case "raw_stream":
                     boolean rawStream = Boolean.parseBoolean(value);

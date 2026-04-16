@@ -17,6 +17,7 @@ import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.view.Surface;
@@ -41,6 +42,7 @@ public class SurfaceEncoder implements AsyncProcessor {
 
     private static final int DEFAULT_I_FRAME_INTERVAL = 10; // seconds
     private static final int REPEAT_FRAME_DELAY_US = 100_000; // repeat after 100ms
+    private static final long DEFAULT_FRAME_REFRESH_INTERVAL_MS = 500; // force a frame every 500ms
     private static final long DEQUEUE_TIMEOUT_US = 1_000_000; // 1 second
     private static final int PREPARE_RETRY_DELAY_MS = 200;
     private static final int PREPARE_RETRY_COUNT = 3;
@@ -58,6 +60,7 @@ public class SurfaceEncoder implements AsyncProcessor {
     private final int videoBitRate;
     private final float maxFps;
     private final boolean downsizeOnError;
+    private final long frameRefreshIntervalMs;
 
     private SocketReconnector socketReconnector;
 
@@ -80,6 +83,8 @@ public class SurfaceEncoder implements AsyncProcessor {
         this.codecOptions = options.getVideoCodecOptions();
         this.encoderName = options.getVideoEncoder();
         this.downsizeOnError = options.getDownsizeOnError();
+        int interval = options.getFrameRefreshIntervalMs();
+        this.frameRefreshIntervalMs = interval > 0 ? interval : DEFAULT_FRAME_REFRESH_INTERVAL_MS;
     }
 
     public void setSocketReconnector(SocketReconnector reconnector) {
@@ -380,7 +385,34 @@ public class SurfaceEncoder implements AsyncProcessor {
         long packetsThisSession = 0;
         long packetsSkipped = 0;
 
+        // Periodically request a sync frame from the encoder to force output
+        // even when the screen content hasn't changed
+        AtomicBoolean encoding = new AtomicBoolean(true);
+        Thread invalidateThread = new Thread(() -> {
+            Bundle params = new Bundle();
+            params.putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0);
+            while (encoding.get()) {
+                try {
+                    Thread.sleep(frameRefreshIntervalMs);
+                } catch (InterruptedException e) {
+                    break;
+                }
+                if (!encoding.get()) {
+                    break;
+                }
+                try {
+                    codec.setParameters(params);
+                } catch (Exception e) {
+                    // Codec may have been released
+                    break;
+                }
+            }
+        }, "frame-refresh");
+        invalidateThread.setDaemon(true);
+        invalidateThread.start();
+
         boolean eos = false;
+        try {
         do {
             int outputBufferId = codec.dequeueOutputBuffer(bufferInfo, DEQUEUE_TIMEOUT_US);
             try {
@@ -460,6 +492,10 @@ public class SurfaceEncoder implements AsyncProcessor {
                 }
             }
         } while (!eos);
+        } finally {
+            encoding.set(false);
+            invalidateThread.interrupt();
+        }
     }
 
     private static MediaCodec createMediaCodec(Codec codec, String encoderName) throws IOException, ConfigurationException {
